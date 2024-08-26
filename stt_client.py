@@ -19,7 +19,6 @@ class STTClient:
         self.no_merge_delay = no_merge_delay
         self.vad_threshhold = vad_threshhold
         self.input_language = input_language
-
         self.speech_detected = False
 
         # Whisper model type
@@ -91,10 +90,9 @@ class STTClient:
             self.generated = 0
 
             if start_index >= 0:
-                chunk = self.buffer[start_index:end_index]
+                self.transcription_queue.put(self.buffer[start_index:end_index])
             else:
-                chunk = np.concatenate([self.buffer[start_index:], self.buffer[:end_index]])
-            self.transcription_queue.put(chunk)
+                self.transcription_queue.put(np.concatenate([self.buffer[start_index:], self.buffer[:end_index]]))
 
 
     # Merge strings based on overlap
@@ -122,45 +120,38 @@ class STTClient:
 
     # Callback for input stream
     def inputstream_callback(self, indata, *_):
-        # Queue audio data to ring buffer for chunking
         self.audio_buffer.queue_audio_data(indata.squeeze())
-        # Check if user is speaking in latest input audio data
         self.speech_detected = self.vad_model(from_numpy(indata.squeeze()), self.sample_rate).item() > self.vad_threshhold
 
 
     # Prompt stt model and continuously yield full output
     def prompt(self):
-        # Clear existing data
-        self.audio_buffer.clear()
-        self.transcription_queue.queue.clear()
-        self.text_merge_queue.queue.clear()
-        
-        # Start the input audio stream with callback for adding audio data to ring buffer
         mic_stream = sd.InputStream(samplerate=self.sample_rate,
                                     blocksize=self.stream_blocksize,
                                     channels=1,
                                     callback=self.inputstream_callback)
-        with mic_stream:
-            # Wait for voice before starting
-            while not self.speech_detected:
-                time.sleep(0.01)
         
-            # Iterations to avoid merging transcriptions
-            no_merge_iterations = round(self.no_merge_delay / self.chunk_interval)
+        self.audio_buffer.clear()
+        self.transcription_queue.queue.clear()
+        no_merge_iterations = round(self.no_merge_delay / self.chunk_interval)
+        
+        with mic_stream:
+            while not self.speech_detected:
+                time.sleep(0.001)
+
+            self.text_merge_queue.queue.clear()
 
             output = ""
             last_output = ""
             last_output_time = time.time()
 
             while True:
-                new_string = self.text_merge_queue.get()
-                if new_string is not None:
-                    new_string = new_string.strip().replace("\n", " ")
-                    if no_merge_iterations > 0:
-                        no_merge_iterations -= 1
-                        output = new_string
-                    else:
-                        output = self.merge_string(output, new_string)
+                new_string = self.text_merge_queue.get().strip().replace("\n", " ")
+                if no_merge_iterations > 0:
+                    no_merge_iterations -= 1
+                    output = new_string
+                else:
+                    output = self.merge_string(output, new_string)
                 self.text_merge_queue.task_done()
 
                 if output != last_output:
@@ -168,6 +159,7 @@ class STTClient:
                     last_output_time = time.time()
                     yield output
                 elif time.time() - last_output_time >= self.prompt_delay:
+                    self.transcribing = False
                     return
 
 
@@ -175,12 +167,9 @@ class STTClient:
     def transcribe_queue(self):
         while True:
             audio_chunk = self.transcription_queue.get()
-            if self.speech_detected:
-                segments, _ = self.stt_model.transcribe(audio_chunk, language=self.input_language)
-                text = ""
-                for segment in segments:
-                    text += segment.text
-                self.text_merge_queue.put(text)
-            else:
-                self.text_merge_queue.put(None)
+            segments, _ = self.stt_model.transcribe(audio_chunk, language=self.input_language)
+            text = ""
+            for segment in segments:
+                text += segment.text
+            self.text_merge_queue.put(text)
             self.transcription_queue.task_done()
