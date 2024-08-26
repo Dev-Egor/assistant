@@ -13,3 +13,4 @@ Objective: |
   Use only the functions provided within <functions></functions> XML tags.
   For each function call insert a valid json object containing a function name and a python dictionary of arguments within <function_call></function_call> XML tags.
   For example: <function_call>{{"arguments": {{"code-string": "result = 2 + 2\nprint(result)"}}, "name": "execute_code"}}</function_call>
+  Only use default Python packages when executing code.

@@ -3,9 +3,9 @@ __pycache__/
 xtts/base_models/
 xtts/finetune_models/
 xtts/venv
-personas/ayaka/tts/*
-!personas/ayaka/tts/
-personas/vega/tts/*
-!personas/vega/tts/
-personas/vega/rvc/*
-!personas/vega/rvc/
+config/ayaka/tts/*
+!config/ayaka/tts/
+config/vega/tts/*
+!config/vega/tts/
+config/vega/rvc/*
+!config/vega/rvc/

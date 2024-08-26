@@ -1,20 +1,21 @@
 import os
 import prompt_generator
 import configparser
+import warnings
 
 # Display available personas and store selected directory
 print("Available personas:")
-personas = [f for f in os.listdir("personas")]
+personas = [f for f in os.listdir("config") if os.path.isdir(os.path.join("config", f))]
 for i, folder in enumerate(personas, start=1):
     print(f"{i}. {folder.capitalize()}")
 selected = personas[int(input("Enter a number to select a persona: ")) - 1]
-persona_dir = os.path.join("personas", selected)
+persona_dir = os.path.join("config", selected)
 
 # Parse global and persona configs
 persona_config = configparser.ConfigParser()
 persona_config.read(os.path.join(persona_dir, "config.ini"))
 global_config = configparser.ConfigParser()
-global_config.read("global_config.ini")
+global_config.read("config/global.ini")
 
 # User input section
 stt_enabled = input("Enter 'y' to enable STT capabilities: ") == "y"
@@ -75,5 +76,6 @@ class Initializer:
                 input_language = language
             ) 
 
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
         print("LOADING COMPLETE!")
         return llm_client, tts_client if tts_enabled else None, stt_client if stt_enabled else None
