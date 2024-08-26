@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+xtts/base_models/
+xtts/finetune_models/
+xtts/venv
+personas/ayaka/tts/*
+!personas/ayaka/tts/
+personas/vega/tts/*
+!personas/vega/tts/
+personas/vega/rvc/*
+!personas/vega/rvc/
