@@ -2,24 +2,33 @@ import sounddevice as sd
 import numpy as np
 from faster_whisper import WhisperModel
 import queue
-import threading
 import time
+import threading
+from silero_vad import load_silero_vad
+from torch import from_numpy
 
 
 class STTClient:
-    def __init__(self, sample_rate, model_type, device, compute_type, chunk_interval, chunk_duration, prompt_delay, no_merge_delay, vad_threshhold, input_language):
+    def __init__(self, sample_rate, stream_blocksize, model_type, device, compute_type, chunk_interval, chunk_duration, prompt_delay, no_merge_delay, vad_threshhold, input_language):
+        
         self.sample_rate = sample_rate
+        self.stream_blocksize = stream_blocksize
         self.chunk_interval = chunk_interval
         self.chunk_duration = chunk_duration
         self.prompt_delay = prompt_delay
         self.no_merge_delay = no_merge_delay
         self.vad_threshhold = vad_threshhold
         self.input_language = input_language
+
         self.speech_detected = False
 
         # Whisper model type
         print("Loading and configuring Whisper STT model...")
-        self.model = WhisperModel(model_type, device=device, compute_type=compute_type)
+        self.stt_model = WhisperModel(model_type, device=device, compute_type=compute_type)
+
+        # Load Silero VAD model
+        print("Loading Silero VAD model...")
+        self.vad_model = load_silero_vad()
 
         # Queue for audio chunks to be transcribed
         self.transcription_queue = queue.Queue()
@@ -30,21 +39,21 @@ class STTClient:
         # Ring buffer for storing continuous mic input
         print("Creating ring buffer for recording mic input...")
         self.audio_buffer = self.AudioRingBuffer(sample_rate = self.sample_rate,
+                                                 stream_blocksize = self.stream_blocksize,
                                                  chunk_interval = self.chunk_interval,
                                                  chunk_duration = self.chunk_duration,
                                                  transcription_queue = self.transcription_queue)
-
-        # separate thread for transcriptions to run
+        
+        # Separate thread for transcriptions to run
         print("Creating and starting audio transcribing thread...")
         self.transcribe_thread = threading.Thread(target=self.transcribe_queue)
         self.transcribe_thread.start()
 
 
     class AudioRingBuffer:
-        def __init__(self, sample_rate, chunk_interval, chunk_duration, transcription_queue):
-            callback_size = sample_rate * 0.026 # what the fuck?
-            self.chunk_interval = int(round(sample_rate * chunk_interval / callback_size) * callback_size)
-            self.chunk_duration = int(round(sample_rate * chunk_duration / callback_size) * callback_size)
+        def __init__(self, sample_rate, stream_blocksize, chunk_interval, chunk_duration, transcription_queue):
+            self.chunk_interval = int(round(sample_rate * chunk_interval / stream_blocksize) * stream_blocksize)
+            self.chunk_duration = int(round(sample_rate * chunk_duration / stream_blocksize) * stream_blocksize)
             self.transcription_queue = transcription_queue
             self.capacity = self.chunk_interval + self.chunk_duration
             self.buffer = np.zeros(self.capacity)
@@ -88,7 +97,38 @@ class STTClient:
             self.transcription_queue.put(chunk)
 
 
-    # Prompt model and continuously yield full output
+    # Merge strings based on overlap
+    def merge_string(self, s1, s2):
+        m = len(s1)
+        n = len(s2)
+        dp = [[0 for _ in range(n+1)] for _ in range(m+1)]
+        longest = 0
+        end = 0
+        for i in range(m + 1):
+            for j in range(n + 1):
+                if i == 0 or j == 0:
+                    dp[i][j] = 0
+                elif s1[i-1] == s2[j-1]:
+                    dp[i][j] = dp[i-1][j-1] + 1
+                    if dp[i][j] >= longest:
+                        longest = dp[i][j]
+                        end = i - 1
+                else:
+                    dp[i][j] = 0
+        lcs = s1[end-longest+1 : end+1]
+        overlap_merge = s1[:end-longest+1] + lcs + s2[s2.find(lcs) + longest:]
+        return overlap_merge
+
+
+    # Callback for input stream
+    def inputstream_callback(self, indata, *_):
+        # Queue audio data to ring buffer for chunking
+        self.audio_buffer.queue_audio_data(indata.squeeze())
+        # Check if user is speaking in latest input audio data
+        self.speech_detected = self.vad_model(from_numpy(indata.squeeze()), self.sample_rate).item() > self.vad_threshhold
+
+
+    # Prompt stt model and continuously yield full output
     def prompt(self):
         # Clear existing data
         self.audio_buffer.clear()
@@ -97,8 +137,9 @@ class STTClient:
         
         # Start the input audio stream with callback for adding audio data to ring buffer
         mic_stream = sd.InputStream(samplerate=self.sample_rate,
+                                    blocksize=self.stream_blocksize,
                                     channels=1,
-                                    callback=lambda indata, *_: self.audio_buffer.queue_audio_data(indata.squeeze()))
+                                    callback=self.inputstream_callback)
         with mic_stream:
             # Wait for voice before starting
             while not self.speech_detected:
@@ -130,37 +171,12 @@ class STTClient:
                     return
 
 
-    # Merge strings based on overlap
-    def merge_string(self, s1, s2):
-        m = len(s1)
-        n = len(s2)
-        dp = [[0 for _ in range(n+1)] for _ in range(m+1)]
-        longest = 0
-        end = 0
-        for i in range(m + 1):
-            for j in range(n + 1):
-                if i == 0 or j == 0:
-                    dp[i][j] = 0
-                elif s1[i-1] == s2[j-1]:
-                    dp[i][j] = dp[i-1][j-1] + 1
-                    if dp[i][j] >= longest:
-                        longest = dp[i][j]
-                        end = i - 1
-                else:
-                    dp[i][j] = 0
-        lcs = s1[end-longest+1 : end+1]
-        overlap_merge = s1[:end-longest+1] + lcs + s2[s2.find(lcs) + longest:]
-        return overlap_merge
-
-
-    # Transcribe audio chunks from queue
+    # Transcribe audio chunk
     def transcribe_queue(self):
         while True:
             audio_chunk = self.transcription_queue.get()
-            self.vad(audio_chunk)
-
             if self.speech_detected:
-                segments, _ = self.model.transcribe(audio_chunk, language=self.input_language)
+                segments, _ = self.stt_model.transcribe(audio_chunk, language=self.input_language)
                 text = ""
                 for segment in segments:
                     text += segment.text
@@ -168,8 +184,3 @@ class STTClient:
             else:
                 self.text_merge_queue.put(None)
             self.transcription_queue.task_done()
-
-
-    # Use RMS to detect voice activity in last second of audio chunk very primitively TODO silero maybe
-    def vad(self, audio_chunk):
-        self.speech_detected = np.sqrt(np.mean(np.square(audio_chunk[-self.sample_rate:]))) > self.vad_threshhold

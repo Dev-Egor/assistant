@@ -65,6 +65,7 @@ class Initializer:
         if stt_enabled:
             stt_client = STTClient(
                 sample_rate = global_config.getint("STT", "SampleRate"),
+                stream_blocksize = global_config.getint("STT", "StreamBlocksize"),
                 model_type = global_config.get("STT", "ModelEnglish") if language == "en" else global_config.get("STT", "ModelOther"),
                 device = global_config.get("STT", "Device"),
                 compute_type = global_config.get("STT", "ComputeType"),
