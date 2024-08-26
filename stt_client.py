@@ -159,7 +159,6 @@ class STTClient:
                     last_output_time = time.time()
                     yield output
                 elif time.time() - last_output_time >= self.prompt_delay:
-                    self.transcribing = False
                     return
 
 
