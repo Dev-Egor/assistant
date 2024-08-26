@@ -20,7 +20,7 @@ def main():
             for text in stt_text_stream:
                 if text is not None:
                     user_input = text
-                    print(text, end="\r")
+                    print(f"{text}                    ", end="\r")
                 else:
                     break
             print()
