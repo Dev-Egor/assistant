@@ -7,7 +7,7 @@ from TTS.tts.models.xtts import Xtts
 
 
 class XTTSClient:
-    def __init__(self, model_dir, config_path, voice_path, temperature, output_language, rvc_client):
+    def __init__(self, model_dir, config_path, voice_path, temperature, output_language):
         # Get directores of files used in this class
         print("Getting TTS model and voice file directories...")
         self.model_dir = model_dir
@@ -15,7 +15,6 @@ class XTTSClient:
         self.voice_path = voice_path
         self.temperature = temperature
         self.output_language = output_language
-        self.rvc_client = rvc_client
 
         print("Loading and configuring TTS model with DeepSpeed...")
         self.model = self.load_model()
@@ -43,17 +42,14 @@ class XTTSClient:
             temperature = self.temperature
         )
         for audio_chunk in tts_stream:
-            if self.rvc_client:
-                self.play_queue.put(self.rvc_client.process(audio_chunk))
-            else:
-                self.play_queue.put(audio_chunk.cpu().numpy())
+            self.play_queue.put(audio_chunk.cpu().numpy())
 
                 
     # Audio playing stream
     def play_audio_stream(self):
-        output_stream = sd.OutputStream(samplerate=48000 if self.rvc_client else 24000,
+        output_stream = sd.OutputStream(samplerate=24000,
                                         channels=1,
-                                        dtype=np.int16 if self.rvc_client else np.float32)
+                                        dtype=np.float32)
         with output_stream:
             while True:
                 processed_audio_chunk = self.play_queue.get()
