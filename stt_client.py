@@ -126,6 +126,7 @@ class STTClient:
 
 
     # Prompt stt model and continuously yield full output
+    # TODO Test no_merge_iterations
     def prompt(self):
         mic_stream = sd.InputStream(samplerate=self.sample_rate,
                                     blocksize=self.stream_blocksize,
@@ -142,9 +143,7 @@ class STTClient:
             time.sleep(self.chunk_interval)
 
             self.text_merge_queue.queue.clear()
-            output = ""
-            last_output = ""
-            last_output_time = time.time()
+            last_speech_detected = time.time()
 
             while True:
                 new_string = self.text_merge_queue.get().strip().replace("\n", " ")
@@ -154,12 +153,11 @@ class STTClient:
                 else:
                     output = self.merge_string(output, new_string)
                 self.text_merge_queue.task_done()
+                yield output
 
-                if output != last_output:
-                    last_output = output
-                    last_output_time = time.time()
-                    yield output
-                elif time.time() - last_output_time >= self.prompt_delay:
+                if self.speech_detected:
+                    last_speech_detected = time.time()
+                elif time.time() - last_speech_detected >= self.prompt_delay:
                     return
 
 
