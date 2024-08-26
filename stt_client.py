@@ -96,6 +96,7 @@ class STTClient:
 
 
     # Merge strings based on overlap
+    # TODO Use similarity scores because identical matches are unreliable
     def merge_string(self, s1, s2):
         m = len(s1)
         n = len(s2)
