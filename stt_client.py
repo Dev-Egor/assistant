@@ -138,9 +138,9 @@ class STTClient:
         with mic_stream:
             while not self.speech_detected:
                 time.sleep(0.001)
+            time.sleep(self.chunk_interval)
 
             self.text_merge_queue.queue.clear()
-
             output = ""
             last_output = ""
             last_output_time = time.time()
