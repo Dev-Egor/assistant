@@ -49,13 +49,10 @@ def generate_output(llm_client, llm_text_stream, tts_client):
             segment += text
             full_reply += text
 
-            # TODO fix logic here
-            func_called = "<function_call>" in full_reply
-
-            if tts_client and not func_called and len(segment) > 20 and re.fullmatch(r'[^A-Z0-9]{2}[.?!:\n]', segment[-3:], re.DOTALL):
+            if tts_client and len(segment) > 20 and re.fullmatch(r'[^A-Z0-9]{2}[.?!:\n]', segment[-3:], re.DOTALL):
                 tts_client.queue_tts(segment.strip())
                 segment = ""
-        if tts_client and not func_called and segment != "":
+        if tts_client and segment != "":
             tts_client.queue_tts(segment.strip())
         print("")
         
@@ -63,7 +60,7 @@ def generate_output(llm_client, llm_text_stream, tts_client):
         llm_client.history.append({"role": "assistant", "content": full_reply.strip()})
 
         # Recursively prompts itself with the function output until there is no function call
-        if func_called:
+        if "<function_call>" in full_reply:
             prompt = ""
             print(f"{Colors.BLUE}\nFunction Response:{Colors.GRAY}")
             for output_dict in parse_and_call(full_reply):
